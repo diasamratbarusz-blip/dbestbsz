@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <meta
+    name="theme-color"
+    content="#050a0f"
+  >
+
+  <meta
+    name="description"
+    content="Mesh Network Control Center"
+  >
+
+  <title>Mesh Network Control Center</title>
+
+  <link
+    rel="stylesheet"
+    href="/style.css"
+  >
+</head>
+
+<body>
+
+  <div class="app">
+
+    <!-- TOP BAR -->
+
+    <header class="topbar">
+
+      <div class="brand">
+
+        <div class="brandIcon">
+          ◈
+        </div>
+
+        <div>
+          <h1>
+            Mesh Network
+          </h1>
+
+          <p>
+            Decentralized Network Control Center
+          </p>
+        </div>
+
+      </div>
+
+      <div
+        id="connectionStatus"
+        class="connection connecting"
+      >
+        <span class="statusDot"></span>
+        CONNECTING
+      </div>
+
+    </header>
+
+
+    <!-- MAIN -->
+
+    <main>
+
+      <!-- STATS -->
+
+      <section class="stats">
+
+        <article class="statCard">
+
+          <div class="statIcon">
+            ◉
+          </div>
+
+          <div>
+            <span>
+              Total Nodes
+            </span>
+
+            <strong id="totalNodes">
+              0
+            </strong>
+          </div>
+
+        </article>
+
+
+        <article class="statCard">
+
+          <div class="statIcon">
+            ✓
+          </div>
+
+          <div>
+            <span>
+              Online Nodes
+            </span>
+
+            <strong id="onlineNodes">
+              0
+            </strong>
+          </div>
+
+        </article>
+
+
+        <article class="statCard">
+
+          <div class="statIcon">
+            ×
+          </div>
+
+          <div>
+            <span>
+              Offline Nodes
+            </span>
+
+            <strong id="offlineNodes">
+              0
+            </strong>
+          </div>
+
+        </article>
+
+
+        <article class="statCard">
+
+          <div class="statIcon">
+            ⌁
+          </div>
+
+          <div>
+            <span>
+              Gateways
+            </span>
+
+            <strong id="gateways">
+              0
+            </strong>
+          </div>
+
+        </article>
+
+      </section>
+
+
+      <!-- NETWORK -->
+
+      <section class="panel">
+
+        <div class="panelHeader">
+
+          <div>
+            <h2>
+              Network Topology
+            </h2>
+
+            <p>
+              Current network connections
+            </p>
+          </div>
+
+          <div
+            id="linkCount"
+            class="linkBadge"
+          >
+            0 links
+          </div>
+
+        </div>
+
+
+        <div
+          id="network"
+          class="network"
+        >
+
+          <div class="loading">
+            Loading network...
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <!-- ROUTE TESTER -->
+
+      <section class="panel">
+
+        <div class="panelHeader">
+
+          <div>
+            <h2>
+              Route Tester
+            </h2>
+
+            <p>
+              Find the shortest available route
+              between nodes.
+            </p>
+          </div>
+
+        </div>
+
+
+        <div class="routeControls">
+
+          <div class="selectGroup">
+
+            <label>
+              SOURCE
+            </label>
+
+            <select id="fromNode">
+              <option value="">
+                Select source
+              </option>
+            </select>
+
+          </div>
+
+
+          <div class="arrow">
+            →
+          </div>
+
+
+          <div class="selectGroup">
+
+            <label>
+              DESTINATION
+            </label>
+
+            <select id="toNode">
+              <option value="">
+                Select destination
+              </option>
+            </select>
+
+          </div>
+
+
+          <button
+            id="routeButton"
+            class="primaryButton"
+          >
+            Find Route
+          </button>
+
+        </div>
+
+
+        <div
+          id="routeResult"
+          class="routeResult"
+        >
+          Select two nodes to test a route.
+        </div>
+
+      </section>
+
+
+      <!-- NODES -->
+
+      <section class="panel">
+
+        <div class="panelHeader">
+
+          <div>
+            <h2>
+              Network Nodes
+            </h2>
+
+            <p>
+              Monitor connected network devices.
+            </p>
+          </div>
+
+        </div>
+
+
+        <div
+          id="nodes"
+          class="nodes"
+        >
+
+          <div class="loading">
+            Loading nodes...
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <!-- SYSTEM INFORMATION -->
+
+      <section class="panel">
+
+        <div class="panelHeader">
+
+          <div>
+            <h2>
+              Network Information
+            </h2>
+
+            <p>
+              Mesh system status.
+            </p>
+          </div>
+
+        </div>
+
+
+        <div class="informationGrid">
+
+          <div class="infoBox">
+
+            <span>
+              NETWORK TYPE
+            </span>
+
+            <strong>
+              Mesh Network
+            </strong>
+
+          </div>
+
+
+          <div class="infoBox">
+
+            <span>
+              ROUTING
+            </span>
+
+            <strong>
+              Dynamic
+            </strong>
+
+          </div>
+
+
+          <div class="infoBox">
+
+            <span>
+              DISCOVERY
+            </span>
+
+            <strong>
+              Node Based
+            </strong>
+
+          </div>
+
+
+          <div class="infoBox">
+
+            <span>
+              CONNECTION
+            </span>
+
+            <strong id="connectionInfo">
+              Checking...
+            </strong>
+
+          </div>
+
+        </div>
+
+      </section>
+
+    </main>
+
+
+    <!-- FOOTER -->
+
+    <footer>
+
+      <span>
+        Mesh Network
+      </span>
+
+      <span>
+        Network Control Center
+      </span>
+
+    </footer>
+
+  </div>
+
+
+  <script src="/app.js"></script>
+
+</body>
+</html>
