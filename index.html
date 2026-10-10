@@ -15,19 +15,17 @@
 
   <meta
     name="description"
-    content="Mesh Network Control Center"
+    content="Mesh Network Control Center for monitoring nodes, connections, gateways and routes."
   >
 
   <title>Mesh Network Control Center</title>
 
-  <link
-    rel="stylesheet"
-    href="/style.css"
-  >
+  <link rel="stylesheet" href="./style.css">
+
+  <script type="module" src="./app.js"></script>
 </head>
 
 <body>
-
   <div class="app">
 
     <!-- TOP BAR -->
@@ -35,29 +33,39 @@
     <header class="topbar">
 
       <div class="brand">
-
-        <div class="brandIcon">
+        <div class="brandIcon" aria-hidden="true">
           ◈
         </div>
 
         <div>
-          <h1>
-            Mesh Network
-          </h1>
+          <h1>Mesh Network</h1>
 
           <p>
             Decentralized Network Control Center
           </p>
         </div>
-
       </div>
 
-      <div
-        id="connectionStatus"
-        class="connection connecting"
-      >
-        <span class="statusDot"></span>
-        CONNECTING
+      <div class="headerActions">
+
+        <div
+          id="connectionStatus"
+          class="connection connecting"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="statusDot"></span>
+          INITIALIZING
+        </div>
+
+        <button
+          id="refreshButton"
+          class="secondaryButton"
+          type="button"
+        >
+          ↻ Refresh
+        </button>
+
       </div>
 
     </header>
@@ -67,108 +75,86 @@
 
     <main>
 
+      <!-- DEMO / API INFORMATION -->
+
+      <section
+        id="appNotice"
+        class="notice"
+        aria-live="polite"
+      >
+        Initializing network dashboard...
+      </section>
+
+
       <!-- STATS -->
 
       <section class="stats">
 
         <article class="statCard">
-
-          <div class="statIcon">
+          <div class="statIcon" aria-hidden="true">
             ◉
           </div>
 
           <div>
-            <span>
-              Total Nodes
-            </span>
-
-            <strong id="totalNodes">
-              0
-            </strong>
+            <span>Total Nodes</span>
+            <strong id="totalNodes">0</strong>
           </div>
-
         </article>
 
 
         <article class="statCard">
-
-          <div class="statIcon">
+          <div class="statIcon" aria-hidden="true">
             ✓
           </div>
 
           <div>
-            <span>
-              Online Nodes
-            </span>
-
-            <strong id="onlineNodes">
-              0
-            </strong>
+            <span>Online Nodes</span>
+            <strong id="onlineNodes">0</strong>
           </div>
-
         </article>
 
 
         <article class="statCard">
-
-          <div class="statIcon">
+          <div class="statIcon" aria-hidden="true">
             ×
           </div>
 
           <div>
-            <span>
-              Offline Nodes
-            </span>
-
-            <strong id="offlineNodes">
-              0
-            </strong>
+            <span>Offline Nodes</span>
+            <strong id="offlineNodes">0</strong>
           </div>
-
         </article>
 
 
         <article class="statCard">
-
-          <div class="statIcon">
+          <div class="statIcon" aria-hidden="true">
             ⌁
           </div>
 
           <div>
-            <span>
-              Gateways
-            </span>
-
-            <strong id="gateways">
-              0
-            </strong>
+            <span>Gateways</span>
+            <strong id="gateways">0</strong>
           </div>
-
         </article>
 
       </section>
 
 
-      <!-- NETWORK -->
+      <!-- NETWORK TOPOLOGY -->
 
       <section class="panel">
 
         <div class="panelHeader">
 
           <div>
-            <h2>
-              Network Topology
-            </h2>
+            <h2>Network Topology</h2>
 
             <p>
-              Current network connections
+              Visual representation of network connections
             </p>
           </div>
 
-          <div
-            id="linkCount"
-            class="linkBadge"
-          >
+          <div id="linkCount" class="linkBadge">
             0 links
           </div>
 
@@ -178,12 +164,28 @@
         <div
           id="network"
           class="network"
+          aria-label="Network topology diagram"
         >
-
           <div class="loading">
             Loading network...
           </div>
+        </div>
 
+        <div class="legend">
+          <span>
+            <i class="legendDot onlineDot"></i>
+            Online
+          </span>
+
+          <span>
+            <i class="legendDot offlineDot"></i>
+            Offline
+          </span>
+
+          <span>
+            <i class="legendLine"></i>
+            Network link
+          </span>
         </div>
 
       </section>
@@ -196,28 +198,23 @@
         <div class="panelHeader">
 
           <div>
-            <h2>
-              Route Tester
-            </h2>
+            <h2>Route Tester</h2>
 
             <p>
-              Find the shortest available route
-              between nodes.
+              Find the shortest available route between nodes.
             </p>
           </div>
 
         </div>
 
 
-        <div class="routeControls">
+        <form id="routeForm" class="routeControls">
 
           <div class="selectGroup">
 
-            <label>
-              SOURCE
-            </label>
+            <label for="fromNode">SOURCE</label>
 
-            <select id="fromNode">
+            <select id="fromNode" required>
               <option value="">
                 Select source
               </option>
@@ -226,18 +223,16 @@
           </div>
 
 
-          <div class="arrow">
+          <div class="arrow" aria-hidden="true">
             →
           </div>
 
 
           <div class="selectGroup">
 
-            <label>
-              DESTINATION
-            </label>
+            <label for="toNode">DESTINATION</label>
 
-            <select id="toNode">
+            <select id="toNode" required>
               <option value="">
                 Select destination
               </option>
@@ -249,16 +244,19 @@
           <button
             id="routeButton"
             class="primaryButton"
+            type="submit"
           >
             Find Route
           </button>
 
-        </div>
+        </form>
 
 
         <div
           id="routeResult"
           class="routeResult"
+          role="status"
+          aria-live="polite"
         >
           Select two nodes to test a route.
         </div>
@@ -266,20 +264,22 @@
       </section>
 
 
-      <!-- NODES -->
+      <!-- NETWORK NODES -->
 
       <section class="panel">
 
         <div class="panelHeader">
 
           <div>
-            <h2>
-              Network Nodes
-            </h2>
+            <h2>Network Nodes</h2>
 
             <p>
-              Monitor connected network devices.
+              Monitor devices represented in the network data.
             </p>
+          </div>
+
+          <div id="nodeCountBadge" class="smallBadge">
+            0 nodes
           </div>
 
         </div>
@@ -289,11 +289,9 @@
           id="nodes"
           class="nodes"
         >
-
           <div class="loading">
             Loading nodes...
           </div>
-
         </div>
 
       </section>
@@ -306,12 +304,10 @@
         <div class="panelHeader">
 
           <div>
-            <h2>
-              Network Information
-            </h2>
+            <h2>Network Information</h2>
 
             <p>
-              Mesh system status.
+              Mesh system status and configuration.
             </p>
           </div>
 
@@ -321,55 +317,79 @@
         <div class="informationGrid">
 
           <div class="infoBox">
-
-            <span>
-              NETWORK TYPE
-            </span>
+            <span>NETWORK TYPE</span>
 
             <strong>
               Mesh Network
             </strong>
-
           </div>
 
 
           <div class="infoBox">
-
-            <span>
-              ROUTING
-            </span>
+            <span>ROUTING</span>
 
             <strong>
-              Dynamic
+              Shortest Available Path
             </strong>
-
           </div>
 
 
           <div class="infoBox">
-
-            <span>
-              DISCOVERY
-            </span>
+            <span>DISCOVERY</span>
 
             <strong>
-              Node Based
+              Data Source Dependent
             </strong>
-
           </div>
 
 
           <div class="infoBox">
-
-            <span>
-              CONNECTION
-            </span>
+            <span>CONNECTION</span>
 
             <strong id="connectionInfo">
               Checking...
             </strong>
-
           </div>
+
+        </div>
+
+
+        <div class="systemDetails">
+
+          <div>
+            <span>Last Updated</span>
+            <strong id="lastUpdated">Not updated</strong>
+          </div>
+
+          <div>
+            <span>Data Source</span>
+            <strong id="dataSource">Initializing</strong>
+          </div>
+
+          <div>
+            <span>Live Updates</span>
+            <strong id="liveUpdates">Enabled</strong>
+          </div>
+
+        </div>
+
+
+        <div
+          id="appError"
+          class="errorMessage"
+          hidden
+          role="alert"
+        ></div>
+
+        <div class="panelActions">
+
+          <button
+            id="resetDemoButton"
+            class="secondaryButton"
+            type="button"
+          >
+            Reset Demo Network
+          </button>
 
         </div>
 
@@ -381,21 +401,17 @@
     <!-- FOOTER -->
 
     <footer>
-
-      <span>
-        Mesh Network
-      </span>
+      <span>Mesh Network</span>
 
       <span>
         Network Control Center
       </span>
 
+      <span id="footerMode">
+        Demo Mode
+      </span>
     </footer>
 
   </div>
-
-
-  <script src="/app.js"></script>
-
 </body>
-  </html>
+              </html>
