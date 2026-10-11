@@ -15,7 +15,12 @@
 
   <meta
     name="description"
-    content="Mesh Network Control Center for monitoring nodes, connections, gateways and routes."
+    content="Mesh Network Control Center for monitoring nodes, connections, gateways, routes, nearby Wi-Fi discovery and internet availability."
+  >
+
+  <meta
+    name="color-scheme"
+    content="dark"
   >
 
   <title>Mesh Network Control Center</title>
@@ -28,11 +33,14 @@
 <body>
   <div class="app">
 
-    <!-- TOP BAR -->
+    <!-- ==========================================
+         TOP BAR
+    =========================================== -->
 
     <header class="topbar">
 
       <div class="brand">
+
         <div class="brandIcon" aria-hidden="true">
           ◈
         </div>
@@ -44,6 +52,7 @@
             Decentralized Network Control Center
           </p>
         </div>
+
       </div>
 
       <div class="headerActions">
@@ -71,11 +80,15 @@
     </header>
 
 
-    <!-- MAIN -->
+    <!-- ==========================================
+         MAIN CONTENT
+    =========================================== -->
 
     <main>
 
-      <!-- DEMO / API INFORMATION -->
+      <!-- ========================================
+           GENERAL APPLICATION NOTICE
+      ========================================= -->
 
       <section
         id="appNotice"
@@ -86,11 +99,17 @@
       </section>
 
 
-      <!-- STATS -->
+      <!-- ========================================
+           NETWORK STATISTICS
+      ========================================= -->
 
-      <section class="stats">
+      <section
+        class="stats"
+        aria-label="Network statistics"
+      >
 
         <article class="statCard">
+
           <div class="statIcon" aria-hidden="true">
             ◉
           </div>
@@ -99,10 +118,12 @@
             <span>Total Nodes</span>
             <strong id="totalNodes">0</strong>
           </div>
+
         </article>
 
 
         <article class="statCard">
+
           <div class="statIcon" aria-hidden="true">
             ✓
           </div>
@@ -111,10 +132,12 @@
             <span>Online Nodes</span>
             <strong id="onlineNodes">0</strong>
           </div>
+
         </article>
 
 
         <article class="statCard">
+
           <div class="statIcon" aria-hidden="true">
             ×
           </div>
@@ -123,10 +146,12 @@
             <span>Offline Nodes</span>
             <strong id="offlineNodes">0</strong>
           </div>
+
         </article>
 
 
         <article class="statCard">
+
           <div class="statIcon" aria-hidden="true">
             ⌁
           </div>
@@ -135,12 +160,185 @@
             <span>Gateways</span>
             <strong id="gateways">0</strong>
           </div>
+
         </article>
 
       </section>
 
 
-      <!-- NETWORK TOPOLOGY -->
+      <!-- ========================================
+           NEARBY NETWORK DISCOVERY
+      ========================================= -->
+
+      <section
+        id="nearbyNetworksPanel"
+        class="panel"
+        aria-labelledby="nearbyNetworksHeading"
+      >
+
+        <div class="panelHeader">
+
+          <div>
+            <h2 id="nearbyNetworksHeading">
+              Nearby Network Discovery
+            </h2>
+
+            <p>
+              Find available Wi-Fi networks and check internet
+              connectivity using supported devices.
+            </p>
+          </div>
+
+          <div
+            id="nearbyNetworkStatus"
+            class="smallBadge"
+            role="status"
+            aria-live="polite"
+          >
+            Waiting for device
+          </div>
+
+        </div>
+
+
+        <!-- DISCOVERY CONTROLS -->
+
+        <div class="routeControls">
+
+          <div class="selectGroup">
+
+            <label for="networkDiscoveryMode">
+              DISCOVERY MODE
+            </label>
+
+            <select id="networkDiscoveryMode">
+
+              <option value="android">
+                Android Wi-Fi discovery
+              </option>
+
+              <option value="public">
+                Public hotspot discovery
+              </option>
+
+              <option value="mesh">
+                Participating mesh devices
+              </option>
+
+            </select>
+
+          </div>
+
+
+          <button
+            id="scanNearbyNetworksButton"
+            class="primaryButton"
+            type="button"
+            disabled
+            title="Requires a connected Android discovery component"
+          >
+            Scan Nearby
+          </button>
+
+        </div>
+
+
+        <!-- DISCOVERY INFORMATION -->
+
+        <div
+          id="nearbyNetworkNotice"
+          class="notice"
+          role="status"
+          aria-live="polite"
+        >
+          <strong>Android discovery required.</strong>
+
+          <p>
+            This website cannot directly scan nearby Wi-Fi
+            networks. Connect a supported Android application
+            to provide scan results.
+          </p>
+        </div>
+
+
+        <!-- DISCOVERED NETWORKS -->
+
+        <div
+          id="nearbyNetworks"
+          class="nodes"
+          aria-live="polite"
+          aria-label="Discovered nearby networks"
+        >
+
+          <div class="loading">
+            No nearby network scan results are available.
+          </div>
+
+        </div>
+
+
+        <!-- CONNECTIVITY INFORMATION -->
+
+        <div class="informationGrid">
+
+          <div class="infoBox">
+
+            <span>DISCOVERED NETWORKS</span>
+
+            <strong id="nearbyNetworkCount">
+              0
+            </strong>
+
+          </div>
+
+
+          <div class="infoBox">
+
+            <span>INTERNET CHECK</span>
+
+            <strong id="nearbyInternetStatus">
+              Not tested
+            </strong>
+
+          </div>
+
+
+          <div class="infoBox">
+
+            <span>DEVICE PERMISSION</span>
+
+            <strong id="nearbyPermissionStatus">
+              Android required
+            </strong>
+
+          </div>
+
+
+          <div class="infoBox">
+
+            <span>LAST SCAN</span>
+
+            <strong id="nearbyLastScan">
+              Not scanned
+            </strong>
+
+          </div>
+
+        </div>
+
+
+        <p>
+          Only connect to networks you own or are authorized to
+          use. A visible Wi-Fi network is not necessarily free,
+          and detecting a network does not grant access to it.
+        </p>
+
+      </section>
+
+
+      <!-- ========================================
+           NETWORK TOPOLOGY
+      ========================================= -->
 
       <section class="panel">
 
@@ -150,11 +348,14 @@
             <h2>Network Topology</h2>
 
             <p>
-              Visual representation of network connections
+              Visual representation of recorded network connections.
             </p>
           </div>
 
-          <div id="linkCount" class="linkBadge">
+          <div
+            id="linkCount"
+            class="linkBadge"
+          >
             0 links
           </div>
 
@@ -165,13 +366,21 @@
           id="network"
           class="network"
           aria-label="Network topology diagram"
+          role="img"
         >
+
           <div class="loading">
             Loading network...
           </div>
+
         </div>
 
-        <div class="legend">
+
+        <div
+          class="legend"
+          aria-label="Network diagram legend"
+        >
+
           <span>
             <i class="legendDot onlineDot"></i>
             Online
@@ -186,12 +395,15 @@
             <i class="legendLine"></i>
             Network link
           </span>
+
         </div>
 
       </section>
 
 
-      <!-- ROUTE TESTER -->
+      <!-- ========================================
+           ROUTE TESTER
+      ========================================= -->
 
       <section class="panel">
 
@@ -201,41 +413,62 @@
             <h2>Route Tester</h2>
 
             <p>
-              Find the shortest available route between nodes.
+              Find the shortest available route between recorded
+              network nodes.
             </p>
           </div>
 
         </div>
 
 
-        <form id="routeForm" class="routeControls">
+        <form
+          id="routeForm"
+          class="routeControls"
+        >
 
           <div class="selectGroup">
 
-            <label for="fromNode">SOURCE</label>
+            <label for="fromNode">
+              SOURCE
+            </label>
 
-            <select id="fromNode" required>
+            <select
+              id="fromNode"
+              required
+            >
+
               <option value="">
                 Select source
               </option>
+
             </select>
 
           </div>
 
 
-          <div class="arrow" aria-hidden="true">
+          <div
+            class="arrow"
+            aria-hidden="true"
+          >
             →
           </div>
 
 
           <div class="selectGroup">
 
-            <label for="toNode">DESTINATION</label>
+            <label for="toNode">
+              DESTINATION
+            </label>
 
-            <select id="toNode" required>
+            <select
+              id="toNode"
+              required
+            >
+
               <option value="">
                 Select destination
               </option>
+
             </select>
 
           </div>
@@ -264,7 +497,9 @@
       </section>
 
 
-      <!-- NETWORK NODES -->
+      <!-- ========================================
+           NETWORK NODES
+      ========================================= -->
 
       <section class="panel">
 
@@ -278,7 +513,10 @@
             </p>
           </div>
 
-          <div id="nodeCountBadge" class="smallBadge">
+          <div
+            id="nodeCountBadge"
+            class="smallBadge"
+          >
             0 nodes
           </div>
 
@@ -289,15 +527,19 @@
           id="nodes"
           class="nodes"
         >
+
           <div class="loading">
             Loading nodes...
           </div>
+
         </div>
 
       </section>
 
 
-      <!-- SYSTEM INFORMATION -->
+      <!-- ========================================
+           SYSTEM INFORMATION
+      ========================================= -->
 
       <section class="panel">
 
@@ -317,62 +559,85 @@
         <div class="informationGrid">
 
           <div class="infoBox">
+
             <span>NETWORK TYPE</span>
 
             <strong>
               Mesh Network
             </strong>
+
           </div>
 
 
           <div class="infoBox">
+
             <span>ROUTING</span>
 
             <strong>
               Shortest Available Path
             </strong>
+
           </div>
 
 
           <div class="infoBox">
+
             <span>DISCOVERY</span>
 
             <strong>
-              Data Source Dependent
+              Device Integration Required
             </strong>
+
           </div>
 
 
           <div class="infoBox">
+
             <span>CONNECTION</span>
 
             <strong id="connectionInfo">
               Checking...
             </strong>
+
           </div>
 
         </div>
 
+
+        <!-- SYSTEM TIMESTAMPS AND STATUS -->
 
         <div class="systemDetails">
 
           <div>
             <span>Last Updated</span>
-            <strong id="lastUpdated">Not updated</strong>
+
+            <strong id="lastUpdated">
+              Not updated
+            </strong>
           </div>
+
 
           <div>
             <span>Data Source</span>
-            <strong id="dataSource">Initializing</strong>
+
+            <strong id="dataSource">
+              Initializing
+            </strong>
           </div>
+
 
           <div>
             <span>Live Updates</span>
-            <strong id="liveUpdates">Enabled</strong>
+
+            <strong id="liveUpdates">
+              Enabled
+            </strong>
           </div>
 
         </div>
 
+
+        <!-- APPLICATION ERROR -->
 
         <div
           id="appError"
@@ -380,6 +645,9 @@
           hidden
           role="alert"
         ></div>
+
+
+        <!-- SYSTEM ACTIONS -->
 
         <div class="panelActions">
 
@@ -398,10 +666,15 @@
     </main>
 
 
-    <!-- FOOTER -->
+    <!-- ==========================================
+         FOOTER
+    =========================================== -->
 
     <footer>
-      <span>Mesh Network</span>
+
+      <span>
+        Mesh Network
+      </span>
 
       <span>
         Network Control Center
@@ -410,8 +683,9 @@
       <span id="footerMode">
         Demo Mode
       </span>
+
     </footer>
 
   </div>
 </body>
-              </html>
+        </html>
