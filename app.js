@@ -1,5 +1,44 @@
+"use strict";
+
+/*
+ * MESH NETWORK CONTROL CENTER
+ *
+ * Frontend:
+ *   Existing HTML dashboard
+ *
+ * Backend:
+ *   https://mesh-backend-olive.vercel.app
+ *
+ * MongoDB data is accessed through the backend.
+ * Never put your MongoDB URI or API_SECRET in this file.
+ *
+ * IMPORTANT:
+ * This dashboard displays recorded network topology.
+ * It does not independently establish physical mesh links
+ * or forward real network traffic.
+ */
+
+const API_BASE = "https://mesh-backend-olive.vercel.app/api";
+
 const STORAGE_KEY = "mesh-network-demo-v1";
 const REFRESH_INTERVAL = 15000;
+const REQUEST_TIMEOUT = 10000;
+
+let networkData = null;
+let refreshTimer = null;
+let lastRoute = null;
+let isRefreshing = false;
+let dataMode = "demo";
+let lastBackendError = "";
+let lastUpdatedAt = null;
+
+const $ = (id) => document.getElementById(id);
+
+
+/* =========================================================
+   DEFAULT DEMO NETWORK
+   Preserved so the dashboard can still work without the API.
+   ========================================================= */
 
 const DEFAULT_NETWORK = {
   nodes: [
@@ -48,50 +87,27 @@ const DEFAULT_NETWORK = {
   ],
 
   links: [
-    {
-      from: "node-001",
-      to: "node-002"
-    },
-    {
-      from: "node-001",
-      to: "node-003"
-    },
-    {
-      from: "node-002",
-      to: "node-004"
-    },
-    {
-      from: "node-003",
-      to: "node-004"
-    },
-    {
-      from: "node-002",
-      to: "node-005"
-    },
-    {
-      from: "node-003",
-      to: "node-006"
-    },
-    {
-      from: "node-004",
-      to: "node-006"
-    }
+    { from: "node-001", to: "node-002" },
+    { from: "node-001", to: "node-003" },
+    { from: "node-002", to: "node-004" },
+    { from: "node-003", to: "node-004" },
+    { from: "node-002", to: "node-005" },
+    { from: "node-003", to: "node-006" },
+    { from: "node-004", to: "node-006" }
   ]
 };
 
-let networkData = null;
-let refreshTimer = null;
-let lastRoute = null;
-let isRefreshing = false;
 
-const $ = (id) => document.getElementById(id);
+/* =========================================================
+   GENERAL UTILITIES
+   ========================================================= */
 
 function cloneData(data) {
   return JSON.parse(JSON.stringify(data));
 }
 
 function escapeHTML(value) {
-  return String(value).replace(/[&<>"']/g, (character) => {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => {
     const entities = {
       "&": "&amp;",
       "<": "&lt;",
@@ -107,12 +123,16 @@ function escapeHTML(value) {
 function setNotice(message, type = "info") {
   const notice = $("appNotice");
 
+  if (!notice) return;
+
   notice.textContent = message;
   notice.dataset.type = type;
 }
 
 function setError(message = "") {
   const error = $("appError");
+
+  if (!error) return;
 
   error.textContent = message;
   error.hidden = !message;
@@ -121,38 +141,104 @@ function setError(message = "") {
 function setConnection(state, label) {
   const status = $("connectionStatus");
 
-  status.className = `connection ${state}`;
+  if (status) {
+    status.className = `connection ${state}`;
+    status.replaceChildren();
 
-  status.replaceChildren();
+    const dot = document.createElement("span");
+    dot.className = "statusDot";
 
-  const dot = document.createElement("span");
-  dot.className = "statusDot";
+    status.append(
+      dot,
+      document.createTextNode(label)
+    );
+  }
 
-  const text = document.createTextNode(label);
+  const connectionInfo = $("connectionInfo");
 
-  status.append(dot, text);
-
-  $("connectionInfo").textContent = label;
+  if (connectionInfo) {
+    connectionInfo.textContent = label;
+  }
 }
 
 function updateTime() {
-  $("lastUpdated").textContent =
-    new Date().toLocaleString();
-}
-
-function saveNetwork() {
-  try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(networkData)
-    );
-
-    return true;
-  } catch (error) {
-    console.error("Unable to save demo network:", error);
-    return false;
+  if ($("lastUpdated")) {
+    $("lastUpdated").textContent =
+      lastUpdatedAt
+        ? new Date(lastUpdatedAt).toLocaleString()
+        : "Not updated";
   }
 }
+
+function markUpdated() {
+  lastUpdatedAt = new Date().toISOString();
+  updateTime();
+}
+
+
+/* =========================================================
+   HTTP REQUEST HELPER
+   ========================================================= */
+
+async function apiRequest(path, options = {}) {
+  const controller = new AbortController();
+
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, REQUEST_TIMEOUT);
+
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      signal: controller.signal,
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        ...(options.headers || {})
+      }
+    });
+
+    const rawText = await response.text();
+
+    let result = {};
+
+    if (rawText) {
+      try {
+        result = JSON.parse(rawText);
+      } catch {
+        throw new Error(
+          `The backend returned invalid JSON for ${path}.`
+        );
+      }
+    }
+
+    if (!response.ok) {
+      const message =
+        result.message ||
+        result.error ||
+        `Backend request failed with HTTP ${response.status}.`;
+
+      throw new Error(message);
+    }
+
+    return result;
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error(
+        `The request to ${path} timed out.`
+      );
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+
+/* =========================================================
+   VALIDATE LOCAL NETWORK DATA
+   ========================================================= */
 
 function validateNetwork(data) {
   if (
@@ -160,7 +246,9 @@ function validateNetwork(data) {
     !Array.isArray(data.nodes) ||
     !Array.isArray(data.links)
   ) {
-    throw new Error("The network data has an invalid structure.");
+    throw new Error(
+      "The network data has an invalid structure."
+    );
   }
 
   const ids = new Set();
@@ -171,11 +259,15 @@ function validateNetwork(data) {
       typeof node.id !== "string" ||
       !node.id.trim()
     ) {
-      throw new Error("Every node must have a valid string ID.");
+      throw new Error(
+        "Every node must have a valid string ID."
+      );
     }
 
     if (ids.has(node.id)) {
-      throw new Error(`Duplicate node ID: ${node.id}`);
+      throw new Error(
+        `Duplicate node ID: ${node.id}`
+      );
     }
 
     ids.add(node.id);
@@ -200,10 +292,15 @@ function validateNetwork(data) {
       typeof link.to !== "string" ||
       link.from === link.to
     ) {
-      throw new Error("A network link is invalid.");
+      throw new Error(
+        "A network link is invalid."
+      );
     }
 
-    if (!ids.has(link.from) || !ids.has(link.to)) {
+    if (
+      !ids.has(link.from) ||
+      !ids.has(link.to)
+    ) {
       throw new Error(
         `A link references an unknown node: ${link.from} → ${link.to}`
       );
@@ -213,12 +310,36 @@ function validateNetwork(data) {
   return data;
 }
 
+
+/* =========================================================
+   DEMO STORAGE
+   ========================================================= */
+
+function saveNetwork() {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(networkData)
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      "Unable to save demo network:",
+      error
+    );
+
+    return false;
+  }
+}
+
 function loadNetwork() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
 
     if (saved) {
       const parsed = JSON.parse(saved);
+
       validateNetwork(parsed);
 
       return {
@@ -228,7 +349,7 @@ function loadNetwork() {
     }
   } catch (error) {
     console.warn(
-      "Saved network could not be loaded. Restoring defaults.",
+      "Saved demo network could not be loaded. Restoring defaults.",
       error
     );
   }
@@ -239,16 +360,191 @@ function loadNetwork() {
   };
 }
 
+
+/* =========================================================
+   NORMALIZE MONGODB API RESPONSE
+   ========================================================= */
+
+/*
+ * The backend currently returns nodes in this general format:
+ *
+ * {
+ *   id: "...",
+ *   name: "...",
+ *   type: "gateway",
+ *   status: "online",
+ *   lastSeen: "...",
+ *   metadata: {}
+ * }
+ *
+ * The existing dashboard uses:
+ *
+ * {
+ *   id: "...",
+ *   name: "...",
+ *   type: "...",
+ *   online: true,
+ *   gateway: false
+ * }
+ *
+ * This function converts the backend format into the format
+ * used by the existing dashboard.
+ */
+
+function normalizeBackendNetwork(response) {
+  if (
+    !response ||
+    !Array.isArray(response.nodes) ||
+    !Array.isArray(response.links)
+  ) {
+    throw new Error(
+      "The backend did not return valid node and link arrays."
+    );
+  }
+
+  const nodes = response.nodes.map((node) => {
+    const nodeType = String(
+      node.type || "node"
+    ).toLowerCase();
+
+    const status = String(
+      node.status || ""
+    ).toLowerCase();
+
+    const metadata =
+      node.metadata &&
+      typeof node.metadata === "object"
+        ? node.metadata
+        : {};
+
+    const online =
+      status === "online" ||
+      node.online === true;
+
+    const gateway =
+      nodeType === "gateway" ||
+      node.gateway === true ||
+      metadata.gateway === true;
+
+    return {
+      id: String(node.id ?? node._id ?? ""),
+      name: String(
+        node.name ||
+        node.id ||
+        "Unnamed Node"
+      ),
+      type: nodeType,
+      online,
+      gateway,
+      lastSeen: node.lastSeen || null,
+      metadata
+    };
+  });
+
+  const links = response.links.map((link) => ({
+    from: String(link.from ?? ""),
+    to: String(link.to ?? "")
+  }));
+
+  const normalized = {
+    nodes,
+    links
+  };
+
+  validateNetwork(normalized);
+
+  return normalized;
+}
+
+
+/* =========================================================
+   BACKEND CONNECTION
+   ========================================================= */
+
+async function loadRealNetwork() {
+  setConnection(
+    "connecting",
+    "CONNECTING"
+  );
+
+  try {
+    const response = await apiRequest("/network");
+
+    const normalized = normalizeBackendNetwork(response);
+
+    networkData = normalized;
+    dataMode = "live";
+    lastBackendError = "";
+
+    markUpdated();
+
+    renderAll();
+
+    setConnection(
+      "connected",
+      "BACKEND CONNECTED"
+    );
+
+    $("dataSource").textContent =
+      "MongoDB / Vercel API";
+
+    $("liveUpdates").textContent =
+      "15-second polling";
+
+    $("footerMode").textContent =
+      "LIVE API DATA";
+
+    setNotice(
+      "Connected to the backend. The dashboard is displaying network records returned by MongoDB.",
+      "success"
+    );
+
+    setError("");
+
+    return true;
+  } catch (error) {
+    lastBackendError = error.message;
+
+    console.error(
+      "Unable to load live network:",
+      error
+    );
+
+    setConnection(
+      "disconnected",
+      "BACKEND UNAVAILABLE"
+    );
+
+    return false;
+  }
+}
+
+
+/* =========================================================
+   NETWORK ACCESS HELPERS
+   ========================================================= */
+
 function getNodeById(id) {
-  return networkData.nodes.find((node) => node.id === id);
+  if (!networkData) return undefined;
+
+  return networkData.nodes.find(
+    (node) => node.id === id
+  );
 }
 
 function getActiveLinks() {
+  if (!networkData) return [];
+
   return networkData.links.filter((link) => {
     const from = getNodeById(link.from);
     const to = getNodeById(link.to);
 
-    return Boolean(from && to && from.online && to.online);
+    return Boolean(
+      from &&
+      to &&
+      from.online &&
+      to.online
+    );
   });
 }
 
@@ -264,20 +560,19 @@ function getAdjacency() {
   }
 
   for (const link of getActiveLinks()) {
-    adjacency.get(link.from).push(link.to);
-    adjacency.get(link.to).push(link.from);
+    adjacency.get(link.from)?.push(link.to);
+    adjacency.get(link.to)?.push(link.from);
   }
 
   return adjacency;
 }
 
-/*
- * Breadth-first search calculates the shortest route when
- * every link has equal cost.
- *
- * This is a calculation on the supplied graph, not a command
- * to physical routers to forward packets.
- */
+
+/* =========================================================
+   LOCAL SHORTEST-PATH CALCULATION
+   Used only for demo mode.
+   ========================================================= */
+
 function findShortestRoute(sourceId, destinationId) {
   const source = getNodeById(sourceId);
   const destination = getNodeById(destinationId);
@@ -289,17 +584,17 @@ function findShortestRoute(sourceId, destinationId) {
     };
   }
 
-  if (sourceId === destinationId) {
-    return {
-      found: true,
-      path: [sourceId]
-    };
-  }
-
   if (!source.online || !destination.online) {
     return {
       found: false,
       reason: "Both nodes must be online to test a route."
+    };
+  }
+
+  if (sourceId === destinationId) {
+    return {
+      found: true,
+      path: [sourceId]
     };
   }
 
@@ -330,7 +625,8 @@ function findShortestRoute(sourceId, destinationId) {
   if (!visited.has(destinationId)) {
     return {
       found: false,
-      reason: "No route exists through the currently online links."
+      reason:
+        "No route exists through the currently online links."
     };
   }
 
@@ -360,12 +656,25 @@ function findShortestRoute(sourceId, destinationId) {
   };
 }
 
+
+/* =========================================================
+   RENDER STATISTICS
+   ========================================================= */
+
 function renderStats() {
   const nodes = networkData.nodes;
 
-  const online = nodes.filter((node) => node.online);
-  const offline = nodes.filter((node) => !node.online);
-  const gateways = nodes.filter((node) => node.gateway);
+  const online = nodes.filter(
+    (node) => node.online
+  );
+
+  const offline = nodes.filter(
+    (node) => !node.online
+  );
+
+  const gateways = nodes.filter(
+    (node) => node.gateway
+  );
 
   $("totalNodes").textContent = nodes.length;
   $("onlineNodes").textContent = online.length;
@@ -378,6 +687,11 @@ function renderStats() {
   $("nodeCountBadge").textContent =
     `${nodes.length} nodes`;
 }
+
+
+/* =========================================================
+   RENDER NODE CARDS
+   ========================================================= */
 
 function renderNodeCards() {
   const container = $("nodes");
@@ -394,6 +708,10 @@ function renderNodeCards() {
 
   container.innerHTML = networkData.nodes.map((node) => {
     const online = node.online;
+
+    const lastSeenText = node.lastSeen
+      ? new Date(node.lastSeen).toLocaleString()
+      : "Not reported";
 
     return `
       <article class="nodeCard">
@@ -431,18 +749,38 @@ function renderNodeCards() {
             <strong>${online ? "Available" : "Unavailable"}</strong>
           </div>
 
+          ${
+            dataMode === "live"
+              ? `
+                <div>
+                  <span>Last Seen</span>
+                  <strong>${escapeHTML(lastSeenText)}</strong>
+                </div>
+              `
+              : ""
+          }
+
         </div>
 
         <div class="nodeCardFooter">
 
-          <button
-            class="secondaryButton toggleNodeButton"
-            type="button"
-            data-node-id="${escapeHTML(node.id)}"
-            aria-label="${online ? "Set offline" : "Set online"}: ${escapeHTML(node.name)}"
-          >
-            ${online ? "Set Offline" : "Set Online"}
-          </button>
+          ${
+            dataMode === "demo"
+              ? `
+                <button
+                  class="secondaryButton toggleNodeButton"
+                  type="button"
+                  data-node-id="${escapeHTML(node.id)}"
+                >
+                  ${online ? "Set Offline" : "Set Online"}
+                </button>
+              `
+              : `
+                <span class="nodeId">
+                  Managed by backend
+                </span>
+              `
+          }
 
         </div>
 
@@ -450,6 +788,11 @@ function renderNodeCards() {
     `;
   }).join("");
 }
+
+
+/* =========================================================
+   ROUTE SELECTORS
+   ========================================================= */
 
 function populateRouteSelectors() {
   const sourceSelect = $("fromNode");
@@ -459,7 +802,9 @@ function populateRouteSelectors() {
   const previousDestination = destinationSelect.value;
 
   const options = networkData.nodes.map((node) => {
-    const state = node.online ? "Online" : "Offline";
+    const state = node.online
+      ? "Online"
+      : "Offline";
 
     return {
       value: node.id,
@@ -471,6 +816,7 @@ function populateRouteSelectors() {
     select.replaceChildren();
 
     const defaultOption = document.createElement("option");
+
     defaultOption.value = "";
     defaultOption.textContent = placeholder;
 
@@ -485,7 +831,11 @@ function populateRouteSelectors() {
       select.append(option);
     }
 
-    if (options.some((item) => item.value === previousValue)) {
+    if (
+      options.some(
+        (item) => item.value === previousValue
+      )
+    ) {
       select.value = previousValue;
     }
   }
@@ -502,6 +852,11 @@ function populateRouteSelectors() {
     previousDestination
   );
 }
+
+
+/* =========================================================
+   RENDER NETWORK TOPOLOGY
+   ========================================================= */
 
 function renderTopology() {
   const container = $("network");
@@ -523,8 +878,15 @@ function renderTopology() {
   const centerX = width / 2;
   const centerY = height / 2;
 
-  const radiusX = Math.min(255, width * 0.36);
-  const radiusY = Math.min(112, height * 0.34);
+  const radiusX = Math.min(
+    255,
+    width * 0.36
+  );
+
+  const radiusY = Math.min(
+    112,
+    height * 0.34
+  );
 
   const positions = new Map();
 
@@ -548,6 +910,10 @@ function renderTopology() {
   const linksMarkup = networkData.links.map((link) => {
     const from = positions.get(link.from);
     const to = positions.get(link.to);
+
+    if (!from || !to) {
+      return "";
+    }
 
     const active = activeKeys.has(
       getLinkKey(link.from, link.to)
@@ -641,14 +1007,39 @@ function renderTopology() {
   `;
 }
 
+
+/* =========================================================
+   SYSTEM INFORMATION
+   ========================================================= */
+
 function renderInformation() {
-  $("dataSource").textContent = "Local Demo Data";
-  $("liveUpdates").textContent = "Browser Refresh";
+  if (dataMode === "live") {
+    $("dataSource").textContent =
+      "MongoDB / Vercel API";
 
-  $("footerMode").textContent = "DEMO MODE";
+    $("liveUpdates").textContent =
+      "15-second polling";
 
-  setConnection("connected", "DEMO MODE");
+    $("footerMode").textContent =
+      "LIVE API DATA";
+
+    return;
+  }
+
+  $("dataSource").textContent =
+    "Local Demo Data";
+
+  $("liveUpdates").textContent =
+    "Browser Refresh";
+
+  $("footerMode").textContent =
+    "DEMO MODE";
 }
+
+
+/* =========================================================
+   RENDER COMPLETE DASHBOARD
+   ========================================================= */
 
 function renderAll() {
   renderStats();
@@ -658,6 +1049,11 @@ function renderAll() {
   renderInformation();
   updateTime();
 }
+
+
+/* =========================================================
+   ROUTE RESULT DISPLAY
+   ========================================================= */
 
 function showRouteMessage(message, type = "") {
   const result = $("routeResult");
@@ -671,7 +1067,64 @@ function showRouteMessage(message, type = "") {
   result.textContent = message;
 }
 
-function handleRouteTest(event) {
+
+/* =========================================================
+   BACKEND ROUTE TESTING
+   ========================================================= */
+
+/*
+ * Backend endpoint:
+ *
+ * POST /api/routes
+ *
+ * JSON body:
+ * {
+ *   "from": "source-node-id",
+ *   "to": "destination-node-id"
+ * }
+ *
+ * This calls the backend's graph calculation.
+ * It does not configure physical routers.
+ */
+
+async function findBackendRoute(sourceId, destinationId) {
+  const result = await apiRequest("/routes", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: sourceId,
+      to: destinationId
+    })
+  });
+
+  const path = Array.isArray(result.route)
+    ? result.route
+    : Array.isArray(result.path)
+      ? result.path
+      : [];
+
+  const found =
+    result.reachable === true ||
+    result.found === true;
+
+  return {
+    found,
+    path,
+    message: result.message || "",
+    hops: Number.isInteger(result.hops)
+      ? result.hops
+      : Math.max(0, path.length - 1)
+  };
+}
+
+
+/* =========================================================
+   ROUTE TEST FORM HANDLER
+   ========================================================= */
+
+async function handleRouteTest(event) {
   event.preventDefault();
 
   const sourceId = $("fromNode").value;
@@ -686,6 +1139,15 @@ function handleRouteTest(event) {
     return;
   }
 
+  if (dataMode === "live") {
+    await handleLiveRouteTest(
+      sourceId,
+      destinationId
+    );
+
+    return;
+  }
+
   const route = findShortestRoute(
     sourceId,
     destinationId
@@ -694,15 +1156,100 @@ function handleRouteTest(event) {
   if (!route.found) {
     lastRoute = null;
 
-    showRouteMessage(route.reason, "error");
+    showRouteMessage(
+      route.reason,
+      "error"
+    );
 
     return;
   }
 
   lastRoute = route.path;
 
-  const routeNames = route.path.map((id) => {
-    return getNodeById(id).name;
+  displayRoute(
+    route.path,
+    "Demo route calculated locally."
+  );
+}
+
+
+/* =========================================================
+   LIVE ROUTE HANDLER
+   ========================================================= */
+
+async function handleLiveRouteTest(sourceId, destinationId) {
+  const button = $("routeButton");
+
+  button.disabled = true;
+  button.textContent = "Checking...";
+
+  showRouteMessage(
+    "Requesting route information from the backend..."
+  );
+
+  try {
+    const route = await findBackendRoute(
+      sourceId,
+      destinationId
+    );
+
+    if (!route.found || route.path.length === 0) {
+      lastRoute = null;
+
+      showRouteMessage(
+        route.message ||
+          "The backend could not find a route between these nodes.",
+        "error"
+      );
+
+      return;
+    }
+
+    const validPath = route.path.every(
+      (id) => typeof id === "string"
+    );
+
+    if (!validPath) {
+      throw new Error(
+        "The backend returned an invalid route."
+      );
+    }
+
+    lastRoute = route.path;
+
+    displayRoute(
+      route.path,
+      route.message ||
+        "Route calculated using backend network data."
+    );
+  } catch (error) {
+    console.error(
+      "Backend route test failed:",
+      error
+    );
+
+    showRouteMessage(
+      `The backend route test failed: ${error.message}. Check /api/routes and its Vercel logs.`,
+      "error"
+    );
+  } finally {
+    button.disabled = false;
+    button.textContent = "Find Route";
+  }
+}
+
+
+/* =========================================================
+   DISPLAY ROUTE
+   ========================================================= */
+
+function displayRoute(path, description) {
+  const routeNames = path.map((id) => {
+    const node = getNodeById(id);
+
+    return node
+      ? node.name
+      : id;
   });
 
   const container = $("routeResult");
@@ -713,23 +1260,25 @@ function handleRouteTest(event) {
   const heading = document.createElement("strong");
 
   heading.textContent =
-    `Route found: ${route.path.length - 1} link(s)`;
+    `Route found: ${Math.max(0, path.length - 1)} link(s)`;
 
   container.append(heading);
 
   const routeLine = document.createElement("div");
+
   routeLine.style.marginTop = "10px";
 
-  route.path.forEach((id, index) => {
-    const node = getNodeById(id);
-
+  path.forEach((id, index) => {
     const badge = document.createElement("span");
+
     badge.className = "routeNode";
-    badge.textContent = node.name;
+
+    badge.textContent =
+      routeNames[index] || id;
 
     routeLine.append(badge);
 
-    if (index < route.path.length - 1) {
+    if (index < path.length - 1) {
       routeLine.append(
         document.createTextNode(" → ")
       );
@@ -741,29 +1290,56 @@ function handleRouteTest(event) {
   const details = document.createElement("p");
 
   details.textContent =
-    "This is the shortest path in the dashboard's current graph. " +
-    "It does not verify physical packet forwarding.";
+    `${description} This confirms a calculated path in the recorded topology; it does not prove that physical devices are forwarding packets.`;
 
   container.append(details);
 }
 
+
+/* =========================================================
+   DEMO-ONLY NODE TOGGLE
+   ========================================================= */
+
 function handleNodeToggle(event) {
-  const button = event.target.closest(".toggleNodeButton");
+  const button = event.target.closest(
+    ".toggleNodeButton"
+  );
 
   if (!button) {
     return;
   }
 
-  const node = getNodeById(button.dataset.nodeId);
+  /*
+   * Never change backend node status from this demo button.
+   * Live node status should be updated by trusted node agents
+   * calling the backend heartbeat endpoint.
+   */
+
+  if (dataMode !== "demo") {
+    setNotice(
+      "Node status is controlled by the backend. Demo controls are disabled while live data is displayed.",
+      "warning"
+    );
+
+    return;
+  }
+
+  const node = getNodeById(
+    button.dataset.nodeId
+  );
 
   if (!node) {
-    setError("The selected node could not be found.");
+    setError(
+      "The selected node could not be found."
+    );
+
     return;
   }
 
   node.online = !node.online;
 
   saveNetwork();
+
   setError("");
 
   setNotice(
@@ -776,6 +1352,7 @@ function handleNodeToggle(event) {
   if (lastRoute) {
     const stillValid = lastRoute.every((id) => {
       const currentNode = getNodeById(id);
+
       return currentNode && currentNode.online;
     });
 
@@ -789,8 +1366,28 @@ function handleNodeToggle(event) {
   }
 }
 
+
+/* =========================================================
+   RESET DEMO NETWORK
+   ========================================================= */
+
 function resetDemo() {
+  /*
+   * Resetting demo data must not delete MongoDB records.
+   * When live mode is active, do not replace the real data.
+   */
+
+  if (dataMode === "live") {
+    setNotice(
+      "The live MongoDB network is currently displayed. The demo reset button will not change live network records.",
+      "warning"
+    );
+
+    return;
+  }
+
   networkData = cloneData(DEFAULT_NETWORK);
+
   lastRoute = null;
 
   const saved = saveNetwork();
@@ -811,7 +1408,12 @@ function resetDemo() {
   );
 }
 
-function refreshDashboard() {
+
+/* =========================================================
+   REFRESH DASHBOARD
+   ========================================================= */
+
+async function refreshDashboard() {
   if (isRefreshing) {
     return;
   }
@@ -819,56 +1421,34 @@ function refreshDashboard() {
   isRefreshing = true;
 
   const button = $("refreshButton");
+
   button.disabled = true;
 
-  try {
-    /*
-     * The local demo has no physical network service to query.
-     * Refreshing re-reads the saved demo state and re-renders it.
-     */
-    const saved = localStorage.getItem(STORAGE_KEY);
+  const originalText = button.textContent;
 
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      validateNetwork(parsed);
-      networkData = parsed;
+  button.textContent = "Refreshing...";
+
+  try {
+    const connected = await loadRealNetwork();
+
+    if (connected) {
+      setNotice(
+        "Dashboard refreshed successfully using live backend data.",
+        "success"
+      );
+
+      setError("");
+
+      return;
     }
 
-    renderAll();
-    setError("");
-
-    setNotice(
-      "Dashboard refreshed. Displayed nodes and links are demo data, not live physical-device measurements.",
-      "warning"
-    );
-  } catch (error) {
-    console.error("Dashboard refresh failed:", error);
-
-    setError(
-      "The saved demo data could not be loaded. Reset the demo network to restore the default data."
-    );
-  } finally {
-    button.disabled = false;
-    isRefreshing = false;
-  }
-}
-
-function startRefreshTimer() {
-  if (refreshTimer !== null) {
-    clearInterval(refreshTimer);
-  }
-
-  refreshTimer = setInterval(() => {
     /*
-     * This updates the dashboard timestamp and view.
-     * It does not probe physical network devices.
+     * Keep the demo visible if the backend fails.
+     * Do not pretend that demo data is live.
      */
-    updateTime();
-  }, REFRESH_INTERVAL);
-}
 
-function initialize() {
-  try {
+    dataMode = "demo";
+
     const loaded = loadNetwork();
 
     networkData = loaded.data;
@@ -877,19 +1457,116 @@ function initialize() {
 
     renderAll();
 
-    if (loaded.restored) {
-      setNotice(
-        "Demo network restored from this browser's saved data. Node status and links are simulated.",
-        "warning"
+    setConnection(
+      "disconnected",
+      "BACKEND UNAVAILABLE"
+    );
+
+    $("dataSource").textContent =
+      "Local Demo Fallback";
+
+    $("footerMode").textContent =
+      "DEMO FALLBACK";
+
+    setNotice(
+      `Could not load live backend data. Showing the local demo instead. Backend error: ${lastBackendError}`,
+      "warning"
+    );
+
+    setError(
+      `Backend connection failed: ${lastBackendError}`
+    );
+  } catch (error) {
+    console.error(
+      "Dashboard refresh failed:",
+      error
+    );
+
+    setError(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+    isRefreshing = false;
+  }
+}
+
+
+/* =========================================================
+   AUTOMATIC REFRESH
+   ========================================================= */
+
+function startRefreshTimer() {
+  if (refreshTimer !== null) {
+    clearInterval(refreshTimer);
+  }
+
+  refreshTimer = setInterval(() => {
+    refreshDashboard();
+  }, REFRESH_INTERVAL);
+}
+
+
+/* =========================================================
+   INITIALIZATION
+   ========================================================= */
+
+async function initialize() {
+  try {
+    setConnection(
+      "connecting",
+      "CONNECTING"
+    );
+
+    setNotice(
+      "Connecting to the Mesh Network backend..."
+    );
+
+    /*
+     * Load demo first so the page can still show a working
+     * dashboard if the backend is temporarily unavailable.
+     */
+
+    const loaded = loadNetwork();
+
+    networkData = loaded.data;
+
+    validateNetwork(networkData);
+
+    dataMode = "demo";
+
+    renderAll();
+
+    const connected = await loadRealNetwork();
+
+    if (!connected) {
+      dataMode = "demo";
+
+      const fallback = loadNetwork();
+
+      networkData = fallback.data;
+
+      validateNetwork(networkData);
+
+      renderAll();
+
+      setConnection(
+        "disconnected",
+        "BACKEND UNAVAILABLE"
       );
-    } else {
-      const saved = saveNetwork();
+
+      $("dataSource").textContent =
+        "Local Demo Fallback";
+
+      $("footerMode").textContent =
+        "DEMO FALLBACK";
 
       setNotice(
-        saved
-          ? "Demo network ready. Try the route tester or change a node's status. This is a local simulation."
-          : "Demo network ready, but browser storage is unavailable. Changes may not persist after reloading.",
+        `The backend could not load network data. The demo is displayed instead. Backend error: ${lastBackendError}`,
         "warning"
+      );
+
+      setError(
+        `Backend connection failed: ${lastBackendError}`
       );
     }
 
@@ -899,18 +1576,29 @@ function initialize() {
 
     startRefreshTimer();
   } catch (error) {
-    console.error("Dashboard initialization failed:", error);
+    console.error(
+      "Dashboard initialization failed:",
+      error
+    );
 
-    setConnection("disconnected", "INITIALIZATION ERROR");
+    setConnection(
+      "disconnected",
+      "INITIALIZATION ERROR"
+    );
 
     setNotice(
-      "The dashboard could not initialize. Check the browser console for details.",
+      "The dashboard could not initialize. Check the browser console.",
       "error"
     );
 
     setError(error.message);
   }
 }
+
+
+/* =========================================================
+   EVENT LISTENERS
+   ========================================================= */
 
 $("routeForm").addEventListener(
   "submit",
@@ -932,10 +1620,18 @@ $("resetDemoButton").addEventListener(
   resetDemo
 );
 
-window.addEventListener("beforeunload", () => {
-  if (refreshTimer !== null) {
-    clearInterval(refreshTimer);
+window.addEventListener(
+  "beforeunload",
+  () => {
+    if (refreshTimer !== null) {
+      clearInterval(refreshTimer);
+    }
   }
-});
+);
+
+
+/* =========================================================
+   START APPLICATION
+   ========================================================= */
 
 initialize();
