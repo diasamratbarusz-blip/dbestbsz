@@ -2,27 +2,20 @@
 
 /*
  * MESH NETWORK CONTROL CENTER
+ * Frontend dashboard with live backend data and safe demo fallback.
  *
- * Frontend:
- *   Existing HTML dashboard
+ * Backend base: https://mesh-backend-olive.vercel.app/api
+ * Never put MongoDB credentials or API_SECRET in this file.
  *
- * Backend:
- *   https://mesh-backend-olive.vercel.app
- *
- * MongoDB data is accessed through the backend.
- * Never put your MongoDB URI or API_SECRET in this file.
- *
- * IMPORTANT:
- * This dashboard displays recorded network topology.
- * It does not independently establish physical mesh links
+ * This dashboard displays recorded network topology and calculates
+ * routes through that topology. It does not create physical mesh links
  * or forward real network traffic.
  */
 
 const API_BASE = "https://mesh-backend-olive.vercel.app/api";
-
 const STORAGE_KEY = "mesh-network-demo-v1";
 const REFRESH_INTERVAL = 15000;
-const REQUEST_TIMEOUT = 10000;
+const REQUEST_TIMEOUT = 12000;
 
 let networkData = null;
 let refreshTimer = null;
@@ -33,12 +26,6 @@ let lastBackendError = "";
 let lastUpdatedAt = null;
 
 const $ = (id) => document.getElementById(id);
-
-
-/* =========================================================
-   DEFAULT DEMO NETWORK
-   Preserved so the dashboard can still work without the API.
-   ========================================================= */
 
 const DEFAULT_NETWORK = {
   nodes: [
@@ -97,27 +84,20 @@ const DEFAULT_NETWORK = {
   ]
 };
 
-
-/* =========================================================
-   GENERAL UTILITIES
-   ========================================================= */
+/* -------------------- General utilities -------------------- */
 
 function cloneData(data) {
   return JSON.parse(JSON.stringify(data));
 }
 
 function escapeHTML(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (character) => {
-    const entities = {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;"
-    };
-
-    return entities[character];
-  });
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[character]);
 }
 
 function setNotice(message, type = "info") {
@@ -154,19 +134,16 @@ function setConnection(state, label) {
     );
   }
 
-  const connectionInfo = $("connectionInfo");
-
-  if (connectionInfo) {
-    connectionInfo.textContent = label;
+  if ($("connectionInfo")) {
+    $("connectionInfo").textContent = label;
   }
 }
 
 function updateTime() {
   if ($("lastUpdated")) {
-    $("lastUpdated").textContent =
-      lastUpdatedAt
-        ? new Date(lastUpdatedAt).toLocaleString()
-        : "Not updated";
+    $("lastUpdated").textContent = lastUpdatedAt
+      ? new Date(lastUpdatedAt).toLocaleString()
+      : "Not updated";
   }
 }
 
@@ -175,23 +152,38 @@ function markUpdated() {
   updateTime();
 }
 
+function requiredElement(id) {
+  const element = $(id);
 
-/* =========================================================
-   HTTP REQUEST HELPER
-   ========================================================= */
+  if (!element) {
+    throw new Error(
+      `Required dashboard element #${id} was not found in index.html.`
+    );
+  }
+
+  return element;
+}
+
+/* -------------------- HTTP request helper -------------------- */
 
 async function apiRequest(path, options = {}) {
   const controller = new AbortController();
 
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, REQUEST_TIMEOUT);
+  const timeout = setTimeout(
+    () => controller.abort(),
+    REQUEST_TIMEOUT
+  );
+
+  const url = `${API_BASE}${path}`;
 
   try {
-    const response = await fetch(`${API_BASE}${path}`, {
+    const response = await fetch(url, {
       ...options,
+
       signal: controller.signal,
       cache: "no-store",
+      mode: "cors",
+
       headers: {
         Accept: "application/json",
         ...(options.headers || {})
@@ -207,38 +199,52 @@ async function apiRequest(path, options = {}) {
         result = JSON.parse(rawText);
       } catch {
         throw new Error(
-          `The backend returned invalid JSON for ${path}.`
+          `The backend returned non-JSON data for ${path} ` +
+          `(HTTP ${response.status}).`
         );
       }
     }
 
     if (!response.ok) {
-      const message =
+      throw new Error(
         result.message ||
         result.error ||
-        `Backend request failed with HTTP ${response.status}.`;
-
-      throw new Error(message);
+        `Backend request failed with HTTP ${response.status} at ${path}.`
+      );
     }
 
     return result;
+
   } catch (error) {
     if (error.name === "AbortError") {
       throw new Error(
-        `The request to ${path} timed out.`
+        `The request to ${path} timed out after ` +
+        `${REQUEST_TIMEOUT / 1000} seconds.`
+      );
+    }
+
+    if (
+      error instanceof TypeError &&
+      /fetch/i.test(error.message)
+    ) {
+      throw new Error(
+        `Browser could not fetch ${url}. ` +
+        `This is commonly caused by CORS, a wrong API route, ` +
+        `a deployment error, or a network issue. ` +
+        `Check FRONTEND_ORIGIN in the BACKEND Vercel project ` +
+        `and set it to the exact frontend origin: ` +
+        `https://dbestbsz.vercel.app`
       );
     }
 
     throw error;
+
   } finally {
     clearTimeout(timeout);
   }
 }
 
-
-/* =========================================================
-   VALIDATE LOCAL NETWORK DATA
-   ========================================================= */
+/* -------------------- Validate network data -------------------- */
 
 function validateNetwork(data) {
   if (
@@ -247,7 +253,7 @@ function validateNetwork(data) {
     !Array.isArray(data.links)
   ) {
     throw new Error(
-      "The network data has an invalid structure."
+      "The network data must contain nodes and links arrays."
     );
   }
 
@@ -265,9 +271,7 @@ function validateNetwork(data) {
     }
 
     if (ids.has(node.id)) {
-      throw new Error(
-        `Duplicate node ID: ${node.id}`
-      );
+      throw new Error(`Duplicate node ID: ${node.id}`);
     }
 
     ids.add(node.id);
@@ -292,17 +296,13 @@ function validateNetwork(data) {
       typeof link.to !== "string" ||
       link.from === link.to
     ) {
-      throw new Error(
-        "A network link is invalid."
-      );
+      throw new Error("A network link is invalid.");
     }
 
-    if (
-      !ids.has(link.from) ||
-      !ids.has(link.to)
-    ) {
+    if (!ids.has(link.from) || !ids.has(link.to)) {
       throw new Error(
-        `A link references an unknown node: ${link.from} → ${link.to}`
+        `A link references an unknown node: ` +
+        `${link.from} → ${link.to}`
       );
     }
   }
@@ -310,10 +310,7 @@ function validateNetwork(data) {
   return data;
 }
 
-
-/* =========================================================
-   DEMO STORAGE
-   ========================================================= */
+/* -------------------- Local demo storage -------------------- */
 
 function saveNetwork() {
   try {
@@ -323,6 +320,7 @@ function saveNetwork() {
     );
 
     return true;
+
   } catch (error) {
     console.error(
       "Unable to save demo network:",
@@ -347,6 +345,7 @@ function loadNetwork() {
         restored: true
       };
     }
+
   } catch (error) {
     console.warn(
       "Saved demo network could not be loaded. Restoring defaults.",
@@ -360,49 +359,54 @@ function loadNetwork() {
   };
 }
 
-
-/* =========================================================
-   NORMALIZE MONGODB API RESPONSE
-   ========================================================= */
-
-/*
- * The backend currently returns nodes in this general format:
- *
- * {
- *   id: "...",
- *   name: "...",
- *   type: "gateway",
- *   status: "online",
- *   lastSeen: "...",
- *   metadata: {}
- * }
- *
- * The existing dashboard uses:
- *
- * {
- *   id: "...",
- *   name: "...",
- *   type: "...",
- *   online: true,
- *   gateway: false
- * }
- *
- * This function converts the backend format into the format
- * used by the existing dashboard.
- */
+/* -------------------- Normalize backend response -------------------- */
 
 function normalizeBackendNetwork(response) {
+  /*
+   * Supports:
+   *
+   * { nodes: [], links: [] }
+   *
+   * and:
+   *
+   * {
+   *   success: true,
+   *   data: {
+   *     nodes: [],
+   *     links: []
+   *   }
+   * }
+   */
+
+  const payload =
+    response &&
+    response.data &&
+    !Array.isArray(response.data) &&
+    (
+      Array.isArray(response.data.nodes) ||
+      Array.isArray(response.data.links)
+    )
+      ? response.data
+      : response;
+
   if (
-    !response ||
-    !Array.isArray(response.nodes) ||
-    !Array.isArray(response.links)
+    !payload ||
+    !Array.isArray(payload.nodes) ||
+    !Array.isArray(payload.links)
   ) {
+    const receivedKeys =
+      response && typeof response === "object"
+        ? Object.keys(response).join(", ") || "none"
+        : typeof response;
+
     throw new Error(
-      "The backend did not return valid node and link arrays."
+      "The backend did not return valid node and link arrays. " +
+      `Response keys: ${receivedKeys}. ` +
+      "Check GET /api/network."
     );
   }
 
-  const nodes = response.nodes.map((node) => {
+  const nodes = payload.nodes.map((node) => {
     const nodeType = String(
       node.type || "node"
     ).toLowerCase();
@@ -412,8 +416,7 @@ function normalizeBackendNetwork(response) {
     ).toLowerCase();
 
     const metadata =
-      node.metadata &&
-      typeof node.metadata === "object"
+      node.metadata && typeof node.metadata === "object"
         ? node.metadata
         : {};
 
@@ -428,38 +431,50 @@ function normalizeBackendNetwork(response) {
 
     return {
       id: String(node.id ?? node._id ?? ""),
+
       name: String(
         node.name ||
         node.id ||
+        node._id ||
         "Unnamed Node"
       ),
+
       type: nodeType,
       online,
       gateway,
-      lastSeen: node.lastSeen || null,
+
+      lastSeen:
+        node.lastSeen ||
+        node.last_seen ||
+        null,
+
       metadata
     };
   });
 
-  const links = response.links.map((link) => ({
-    from: String(link.from ?? ""),
-    to: String(link.to ?? "")
+  const links = payload.links.map((link) => ({
+    from: String(
+      link.from ??
+      link.source ??
+      link.sourceId ??
+      ""
+    ),
+
+    to: String(
+      link.to ??
+      link.target ??
+      link.targetId ??
+      ""
+    )
   }));
 
-  const normalized = {
+  return validateNetwork({
     nodes,
     links
-  };
-
-  validateNetwork(normalized);
-
-  return normalized;
+  });
 }
 
-
-/* =========================================================
-   BACKEND CONNECTION
-   ========================================================= */
+/* -------------------- Backend connection -------------------- */
 
 async function loadRealNetwork() {
   setConnection(
@@ -470,14 +485,14 @@ async function loadRealNetwork() {
   try {
     const response = await apiRequest("/network");
 
-    const normalized = normalizeBackendNetwork(response);
+    const normalized =
+      normalizeBackendNetwork(response);
 
     networkData = normalized;
     dataMode = "live";
     lastBackendError = "";
 
     markUpdated();
-
     renderAll();
 
     setConnection(
@@ -485,25 +500,34 @@ async function loadRealNetwork() {
       "BACKEND CONNECTED"
     );
 
-    $("dataSource").textContent =
-      "MongoDB / Vercel API";
+    if ($("dataSource")) {
+      $("dataSource").textContent =
+        "MongoDB / Vercel API";
+    }
 
-    $("liveUpdates").textContent =
-      "15-second polling";
+    if ($("liveUpdates")) {
+      $("liveUpdates").textContent =
+        "15-second polling";
+    }
 
-    $("footerMode").textContent =
-      "LIVE API DATA";
+    if ($("footerMode")) {
+      $("footerMode").textContent =
+        "LIVE API DATA";
+    }
 
     setNotice(
-      "Connected to the backend. The dashboard is displaying network records returned by MongoDB.",
+      "Connected to the backend. Displaying network records returned by MongoDB.",
       "success"
     );
 
     setError("");
 
     return true;
+
   } catch (error) {
-    lastBackendError = error.message;
+    lastBackendError =
+      error.message ||
+      "Unknown backend connection error";
 
     console.error(
       "Unable to load live network:",
@@ -519,15 +543,10 @@ async function loadRealNetwork() {
   }
 }
 
-
-/* =========================================================
-   NETWORK ACCESS HELPERS
-   ========================================================= */
+/* -------------------- Network helpers -------------------- */
 
 function getNodeById(id) {
-  if (!networkData) return undefined;
-
-  return networkData.nodes.find(
+  return networkData?.nodes.find(
     (node) => node.id === id
   );
 }
@@ -549,7 +568,9 @@ function getActiveLinks() {
 }
 
 function getLinkKey(from, to) {
-  return [from, to].sort().join("::");
+  return [from, to]
+    .sort()
+    .join("::");
 }
 
 function getAdjacency() {
@@ -567,11 +588,7 @@ function getAdjacency() {
   return adjacency;
 }
 
-
-/* =========================================================
-   LOCAL SHORTEST-PATH CALCULATION
-   Used only for demo mode.
-   ========================================================= */
+/* -------------------- Local shortest-path calculation -------------------- */
 
 function findShortestRoute(sourceId, destinationId) {
   const source = getNodeById(sourceId);
@@ -604,7 +621,7 @@ function findShortestRoute(sourceId, destinationId) {
   const visited = new Set([sourceId]);
   const previous = new Map();
 
-  while (queue.length > 0) {
+  while (queue.length) {
     const current = queue.shift();
 
     if (current === destinationId) {
@@ -625,8 +642,7 @@ function findShortestRoute(sourceId, destinationId) {
   if (!visited.has(destinationId)) {
     return {
       found: false,
-      reason:
-        "No route exists through the currently online links."
+      reason: "No route exists through the currently online links."
     };
   }
 
@@ -656,10 +672,7 @@ function findShortestRoute(sourceId, destinationId) {
   };
 }
 
-
-/* =========================================================
-   RENDER STATISTICS
-   ========================================================= */
+/* -------------------- Render statistics -------------------- */
 
 function renderStats() {
   const nodes = networkData.nodes;
@@ -676,32 +689,43 @@ function renderStats() {
     (node) => node.gateway
   );
 
-  $("totalNodes").textContent = nodes.length;
-  $("onlineNodes").textContent = online.length;
-  $("offlineNodes").textContent = offline.length;
-  $("gateways").textContent = gateways.length;
+  if ($("totalNodes")) {
+    $("totalNodes").textContent = nodes.length;
+  }
 
-  $("linkCount").textContent =
-    `${getActiveLinks().length} active links`;
+  if ($("onlineNodes")) {
+    $("onlineNodes").textContent = online.length;
+  }
 
-  $("nodeCountBadge").textContent =
-    `${nodes.length} nodes`;
+  if ($("offlineNodes")) {
+    $("offlineNodes").textContent = offline.length;
+  }
+
+  if ($("gateways")) {
+    $("gateways").textContent = gateways.length;
+  }
+
+  if ($("linkCount")) {
+    $("linkCount").textContent =
+      `${getActiveLinks().length} active links`;
+  }
+
+  if ($("nodeCountBadge")) {
+    $("nodeCountBadge").textContent =
+      `${nodes.length} nodes`;
+  }
 }
 
-
-/* =========================================================
-   RENDER NODE CARDS
-   ========================================================= */
+/* -------------------- Render node cards -------------------- */
 
 function renderNodeCards() {
   const container = $("nodes");
 
+  if (!container) return;
+
   if (networkData.nodes.length === 0) {
-    container.innerHTML = `
-      <div class="emptyState">
-        No nodes are available.
-      </div>
-    `;
+    container.innerHTML =
+      `<div class="emptyState">No nodes are available.</div>`;
 
     return;
   }
@@ -717,23 +741,17 @@ function renderNodeCards() {
       <article class="nodeCard">
 
         <div class="nodeCardHeader">
-
           <div>
             <h3>${escapeHTML(node.name)}</h3>
-
-            <span class="nodeId">
-              ${escapeHTML(node.id)}
-            </span>
+            <span class="nodeId">${escapeHTML(node.id)}</span>
           </div>
 
           <span class="nodeStatus ${online ? "online" : "offline"}">
             ${online ? "Online" : "Offline"}
           </span>
-
         </div>
 
         <div class="nodeMeta">
-
           <div>
             <span>Node Type</span>
             <strong>${escapeHTML(node.type)}</strong>
@@ -759,11 +777,9 @@ function renderNodeCards() {
               `
               : ""
           }
-
         </div>
 
         <div class="nodeCardFooter">
-
           ${
             dataMode === "demo"
               ? `
@@ -776,12 +792,9 @@ function renderNodeCards() {
                 </button>
               `
               : `
-                <span class="nodeId">
-                  Managed by backend
-                </span>
+                <span class="nodeId">Managed by backend</span>
               `
           }
-
         </div>
 
       </article>
@@ -789,28 +802,25 @@ function renderNodeCards() {
   }).join("");
 }
 
-
-/* =========================================================
-   ROUTE SELECTORS
-   ========================================================= */
+/* -------------------- Route selectors -------------------- */
 
 function populateRouteSelectors() {
   const sourceSelect = $("fromNode");
   const destinationSelect = $("toNode");
 
+  if (!sourceSelect || !destinationSelect) {
+    return;
+  }
+
   const previousSource = sourceSelect.value;
   const previousDestination = destinationSelect.value;
 
-  const options = networkData.nodes.map((node) => {
-    const state = node.online
-      ? "Online"
-      : "Offline";
+  const options = networkData.nodes.map((node) => ({
+    value: node.id,
 
-    return {
-      value: node.id,
-      label: `${node.name} (${state})`
-    };
-  });
+    label:
+      `${node.name} (${node.online ? "Online" : "Offline"})`
+  }));
 
   function fillSelect(select, placeholder, previousValue) {
     select.replaceChildren();
@@ -853,21 +863,18 @@ function populateRouteSelectors() {
   );
 }
 
-
-/* =========================================================
-   RENDER NETWORK TOPOLOGY
-   ========================================================= */
+/* -------------------- Render network topology -------------------- */
 
 function renderTopology() {
   const container = $("network");
+
+  if (!container) return;
+
   const nodes = networkData.nodes;
 
   if (nodes.length === 0) {
-    container.innerHTML = `
-      <div class="emptyState">
-        No nodes available for the topology diagram.
-      </div>
-    `;
+    container.innerHTML =
+      `<div class="emptyState">No nodes available for the topology diagram.</div>`;
 
     return;
   }
@@ -878,15 +885,8 @@ function renderTopology() {
   const centerX = width / 2;
   const centerY = height / 2;
 
-  const radiusX = Math.min(
-    255,
-    width * 0.36
-  );
-
-  const radiusY = Math.min(
-    112,
-    height * 0.34
-  );
+  const radiusX = Math.min(255, width * 0.36);
+  const radiusY = Math.min(112, height * 0.34);
 
   const positions = new Map();
 
@@ -902,8 +902,8 @@ function renderTopology() {
   });
 
   const activeKeys = new Set(
-    getActiveLinks().map((link) =>
-      getLinkKey(link.from, link.to)
+    getActiveLinks().map(
+      (link) => getLinkKey(link.from, link.to)
     )
   );
 
@@ -911,9 +911,7 @@ function renderTopology() {
     const from = positions.get(link.from);
     const to = positions.get(link.to);
 
-    if (!from || !to) {
-      return "";
-    }
+    if (!from || !to) return "";
 
     const active = activeKeys.has(
       getLinkKey(link.from, link.to)
@@ -933,9 +931,10 @@ function renderTopology() {
   const nodesMarkup = nodes.map((node) => {
     const point = positions.get(node.id);
 
-    const label = node.name.length > 18
-      ? `${node.name.slice(0, 16)}…`
-      : node.name;
+    const label =
+      node.name.length > 18
+        ? `${node.name.slice(0, 16)}…`
+        : node.name;
 
     const circleClass = node.gateway
       ? "gatewayCircle"
@@ -950,7 +949,6 @@ function renderTopology() {
         role="img"
         aria-label="${escapeHTML(node.name)}, ${node.online ? "online" : "offline"}"
       >
-
         <title>
           ${escapeHTML(node.name)} — ${node.online ? "Online" : "Offline"}
         </title>
@@ -988,7 +986,6 @@ function renderTopology() {
         >
           ${node.online ? "ONLINE" : "OFFLINE"}
         </text>
-
       </g>
     `;
   }).join("");
@@ -1007,39 +1004,36 @@ function renderTopology() {
   `;
 }
 
-
-/* =========================================================
-   SYSTEM INFORMATION
-   ========================================================= */
+/* -------------------- System information and full render -------------------- */
 
 function renderInformation() {
   if (dataMode === "live") {
-    $("dataSource").textContent =
-      "MongoDB / Vercel API";
+    if ($("dataSource")) {
+      $("dataSource").textContent = "MongoDB / Vercel API";
+    }
 
-    $("liveUpdates").textContent =
-      "15-second polling";
+    if ($("liveUpdates")) {
+      $("liveUpdates").textContent = "15-second polling";
+    }
 
-    $("footerMode").textContent =
-      "LIVE API DATA";
+    if ($("footerMode")) {
+      $("footerMode").textContent = "LIVE API DATA";
+    }
 
-    return;
+  } else {
+    if ($("dataSource")) {
+      $("dataSource").textContent = "Local Demo Data";
+    }
+
+    if ($("liveUpdates")) {
+      $("liveUpdates").textContent = "Browser Refresh";
+    }
+
+    if ($("footerMode")) {
+      $("footerMode").textContent = "DEMO MODE";
+    }
   }
-
-  $("dataSource").textContent =
-    "Local Demo Data";
-
-  $("liveUpdates").textContent =
-    "Browser Refresh";
-
-  $("footerMode").textContent =
-    "DEMO MODE";
 }
-
-
-/* =========================================================
-   RENDER COMPLETE DASHBOARD
-   ========================================================= */
 
 function renderAll() {
   renderStats();
@@ -1050,13 +1044,12 @@ function renderAll() {
   updateTime();
 }
 
-
-/* =========================================================
-   ROUTE RESULT DISPLAY
-   ========================================================= */
+/* -------------------- Route result display -------------------- */
 
 function showRouteMessage(message, type = "") {
   const result = $("routeResult");
+
+  if (!result) return;
 
   result.className = "routeResult";
 
@@ -1067,32 +1060,14 @@ function showRouteMessage(message, type = "") {
   result.textContent = message;
 }
 
-
-/* =========================================================
-   BACKEND ROUTE TESTING
-   ========================================================= */
-
-/*
- * Backend endpoint:
- *
- * POST /api/routes
- *
- * JSON body:
- * {
- *   "from": "source-node-id",
- *   "to": "destination-node-id"
- * }
- *
- * This calls the backend's graph calculation.
- * It does not configure physical routers.
- */
-
 async function findBackendRoute(sourceId, destinationId) {
   const result = await apiRequest("/routes", {
     method: "POST",
+
     headers: {
       "Content-Type": "application/json"
     },
+
     body: JSON.stringify({
       from: sourceId,
       to: destinationId
@@ -1107,28 +1082,28 @@ async function findBackendRoute(sourceId, destinationId) {
 
   const found =
     result.reachable === true ||
-    result.found === true;
+    result.found === true ||
+    (
+      path.length > 0 &&
+      result.success !== false
+    );
 
   return {
     found,
     path,
     message: result.message || "",
+
     hops: Number.isInteger(result.hops)
       ? result.hops
       : Math.max(0, path.length - 1)
   };
 }
 
-
-/* =========================================================
-   ROUTE TEST FORM HANDLER
-   ========================================================= */
-
 async function handleRouteTest(event) {
   event.preventDefault();
 
-  const sourceId = $("fromNode").value;
-  const destinationId = $("toNode").value;
+  const sourceId = $("fromNode")?.value;
+  const destinationId = $("toNode")?.value;
 
   if (!sourceId || !destinationId) {
     showRouteMessage(
@@ -1172,16 +1147,13 @@ async function handleRouteTest(event) {
   );
 }
 
-
-/* =========================================================
-   LIVE ROUTE HANDLER
-   ========================================================= */
-
 async function handleLiveRouteTest(sourceId, destinationId) {
   const button = $("routeButton");
 
-  button.disabled = true;
-  button.textContent = "Checking...";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Checking...";
+  }
 
   showRouteMessage(
     "Requesting route information from the backend..."
@@ -1198,18 +1170,18 @@ async function handleLiveRouteTest(sourceId, destinationId) {
 
       showRouteMessage(
         route.message ||
-          "The backend could not find a route between these nodes.",
+        "The backend could not find a route between these nodes.",
         "error"
       );
 
       return;
     }
 
-    const validPath = route.path.every(
-      (id) => typeof id === "string"
-    );
-
-    if (!validPath) {
+    if (
+      !route.path.every(
+        (id) => typeof id === "string"
+      )
+    ) {
       throw new Error(
         "The backend returned an invalid route."
       );
@@ -1220,8 +1192,9 @@ async function handleLiveRouteTest(sourceId, destinationId) {
     displayRoute(
       route.path,
       route.message ||
-        "Route calculated using backend network data."
+      "Route calculated using backend network data."
     );
+
   } catch (error) {
     console.error(
       "Backend route test failed:",
@@ -1229,30 +1202,27 @@ async function handleLiveRouteTest(sourceId, destinationId) {
     );
 
     showRouteMessage(
-      `The backend route test failed: ${error.message}. Check /api/routes and its Vercel logs.`,
+      `Backend route test failed: ${error.message}. ` +
+      "Check /api/routes and Vercel logs.",
       "error"
     );
+
   } finally {
-    button.disabled = false;
-    button.textContent = "Find Route";
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Find Route";
+    }
   }
 }
 
-
-/* =========================================================
-   DISPLAY ROUTE
-   ========================================================= */
-
 function displayRoute(path, description) {
-  const routeNames = path.map((id) => {
-    const node = getNodeById(id);
-
-    return node
-      ? node.name
-      : id;
-  });
+  const routeNames = path.map(
+    (id) => getNodeById(id)?.name || id
+  );
 
   const container = $("routeResult");
+
+  if (!container) return;
 
   container.className = "routeResult success";
   container.replaceChildren();
@@ -1272,9 +1242,7 @@ function displayRoute(path, description) {
     const badge = document.createElement("span");
 
     badge.className = "routeNode";
-
-    badge.textContent =
-      routeNames[index] || id;
+    badge.textContent = routeNames[index] || id;
 
     routeLine.append(badge);
 
@@ -1290,37 +1258,20 @@ function displayRoute(path, description) {
   const details = document.createElement("p");
 
   details.textContent =
-    `${description} This confirms a calculated path in the recorded topology; it does not prove that physical devices are forwarding packets.`;
+    `${description} This confirms a calculated path in the recorded topology; ` +
+    "it does not prove that physical devices are forwarding packets.";
 
   container.append(details);
 }
 
-
-/* =========================================================
-   DEMO-ONLY NODE TOGGLE
-   ========================================================= */
+/* -------------------- Demo-only node toggle -------------------- */
 
 function handleNodeToggle(event) {
   const button = event.target.closest(
     ".toggleNodeButton"
   );
 
-  if (!button) {
-    return;
-  }
-
-  /*
-   * Never change backend node status from this demo button.
-   * Live node status should be updated by trusted node agents
-   * calling the backend heartbeat endpoint.
-   */
-
-  if (dataMode !== "demo") {
-    setNotice(
-      "Node status is controlled by the backend. Demo controls are disabled while live data is displayed.",
-      "warning"
-    );
-
+  if (!button || dataMode !== "demo") {
     return;
   }
 
@@ -1343,7 +1294,8 @@ function handleNodeToggle(event) {
   setError("");
 
   setNotice(
-    `${node.name} is now marked ${node.online ? "online" : "offline"} in the demo network.`,
+    `${node.name} is now marked ` +
+    `${node.online ? "online" : "offline"} in the demo network.`,
     "warning"
   );
 
@@ -1366,20 +1318,12 @@ function handleNodeToggle(event) {
   }
 }
 
-
-/* =========================================================
-   RESET DEMO NETWORK
-   ========================================================= */
+/* -------------------- Reset demo network -------------------- */
 
 function resetDemo() {
-  /*
-   * Resetting demo data must not delete MongoDB records.
-   * When live mode is active, do not replace the real data.
-   */
-
   if (dataMode === "live") {
     setNotice(
-      "The live MongoDB network is currently displayed. The demo reset button will not change live network records.",
+      "Live MongoDB data is displayed. Reset Demo will not change backend records.",
       "warning"
     );
 
@@ -1387,7 +1331,6 @@ function resetDemo() {
   }
 
   networkData = cloneData(DEFAULT_NETWORK);
-
   lastRoute = null;
 
   const saved = saveNetwork();
@@ -1408,25 +1351,24 @@ function resetDemo() {
   );
 }
 
-
-/* =========================================================
-   REFRESH DASHBOARD
-   ========================================================= */
+/* -------------------- Refresh dashboard -------------------- */
 
 async function refreshDashboard() {
-  if (isRefreshing) {
-    return;
-  }
+  if (isRefreshing) return;
 
   isRefreshing = true;
 
   const button = $("refreshButton");
 
-  button.disabled = true;
+  if (button) {
+    button.disabled = true;
 
-  const originalText = button.textContent;
+    button.dataset.originalText =
+      button.dataset.originalText ||
+      button.textContent;
 
-  button.textContent = "Refreshing...";
+    button.textContent = "Refreshing...";
+  }
 
   try {
     const connected = await loadRealNetwork();
@@ -1442,16 +1384,9 @@ async function refreshDashboard() {
       return;
     }
 
-    /*
-     * Keep the demo visible if the backend fails.
-     * Do not pretend that demo data is live.
-     */
-
     dataMode = "demo";
 
-    const loaded = loadNetwork();
-
-    networkData = loaded.data;
+    networkData = loadNetwork().data;
 
     validateNetwork(networkData);
 
@@ -1462,20 +1397,27 @@ async function refreshDashboard() {
       "BACKEND UNAVAILABLE"
     );
 
-    $("dataSource").textContent =
-      "Local Demo Fallback";
+    if ($("dataSource")) {
+      $("dataSource").textContent =
+        "Local Demo Fallback";
+    }
 
-    $("footerMode").textContent =
-      "DEMO FALLBACK";
+    if ($("footerMode")) {
+      $("footerMode").textContent =
+        "DEMO FALLBACK";
+    }
 
     setNotice(
-      `Could not load live backend data. Showing the local demo instead. Backend error: ${lastBackendError}`,
+      `Could not load live backend data. ` +
+      `Showing the local demo instead. ` +
+      `Backend error: ${lastBackendError}`,
       "warning"
     );
 
     setError(
       `Backend connection failed: ${lastBackendError}`
     );
+
   } catch (error) {
     console.error(
       "Dashboard refresh failed:",
@@ -1483,32 +1425,34 @@ async function refreshDashboard() {
     );
 
     setError(error.message);
+
   } finally {
-    button.disabled = false;
-    button.textContent = originalText;
+    if (button) {
+      button.disabled = false;
+
+      button.textContent =
+        button.dataset.originalText ||
+        "Refresh";
+    }
+
     isRefreshing = false;
   }
 }
 
-
-/* =========================================================
-   AUTOMATIC REFRESH
-   ========================================================= */
+/* -------------------- Automatic refresh -------------------- */
 
 function startRefreshTimer() {
   if (refreshTimer !== null) {
     clearInterval(refreshTimer);
   }
 
-  refreshTimer = setInterval(() => {
-    refreshDashboard();
-  }, REFRESH_INTERVAL);
+  refreshTimer = setInterval(
+    refreshDashboard,
+    REFRESH_INTERVAL
+  );
 }
 
-
-/* =========================================================
-   INITIALIZATION
-   ========================================================= */
+/* -------------------- Initialization -------------------- */
 
 async function initialize() {
   try {
@@ -1521,14 +1465,7 @@ async function initialize() {
       "Connecting to the Mesh Network backend..."
     );
 
-    /*
-     * Load demo first so the page can still show a working
-     * dashboard if the backend is temporarily unavailable.
-     */
-
-    const loaded = loadNetwork();
-
-    networkData = loaded.data;
+    networkData = loadNetwork().data;
 
     validateNetwork(networkData);
 
@@ -1541,9 +1478,7 @@ async function initialize() {
     if (!connected) {
       dataMode = "demo";
 
-      const fallback = loadNetwork();
-
-      networkData = fallback.data;
+      networkData = loadNetwork().data;
 
       validateNetwork(networkData);
 
@@ -1554,14 +1489,20 @@ async function initialize() {
         "BACKEND UNAVAILABLE"
       );
 
-      $("dataSource").textContent =
-        "Local Demo Fallback";
+      if ($("dataSource")) {
+        $("dataSource").textContent =
+          "Local Demo Fallback";
+      }
 
-      $("footerMode").textContent =
-        "DEMO FALLBACK";
+      if ($("footerMode")) {
+        $("footerMode").textContent =
+          "DEMO FALLBACK";
+      }
 
       setNotice(
-        `The backend could not load network data. The demo is displayed instead. Backend error: ${lastBackendError}`,
+        `The backend could not load network data. ` +
+        `The demo is displayed instead. ` +
+        `Backend error: ${lastBackendError}`,
         "warning"
       );
 
@@ -1575,6 +1516,7 @@ async function initialize() {
     );
 
     startRefreshTimer();
+
   } catch (error) {
     console.error(
       "Dashboard initialization failed:",
@@ -1587,7 +1529,7 @@ async function initialize() {
     );
 
     setNotice(
-      "The dashboard could not initialize. Check the browser console.",
+      "The dashboard could not initialize. Check that index.html contains the expected element IDs.",
       "error"
     );
 
@@ -1595,43 +1537,53 @@ async function initialize() {
   }
 }
 
+/* -------------------- Event listeners -------------------- */
 
-/* =========================================================
-   EVENT LISTENERS
-   ========================================================= */
+function bindEvents() {
+  const routeForm = $("routeForm");
+  const nodes = $("nodes");
+  const refreshButton = $("refreshButton");
+  const resetButton = $("resetDemoButton");
 
-$("routeForm").addEventListener(
-  "submit",
-  handleRouteTest
-);
-
-$("nodes").addEventListener(
-  "click",
-  handleNodeToggle
-);
-
-$("refreshButton").addEventListener(
-  "click",
-  refreshDashboard
-);
-
-$("resetDemoButton").addEventListener(
-  "click",
-  resetDemo
-);
-
-window.addEventListener(
-  "beforeunload",
-  () => {
-    if (refreshTimer !== null) {
-      clearInterval(refreshTimer);
-    }
+  if (routeForm) {
+    routeForm.addEventListener(
+      "submit",
+      handleRouteTest
+    );
   }
-);
 
+  if (nodes) {
+    nodes.addEventListener(
+      "click",
+      handleNodeToggle
+    );
+  }
 
-/* =========================================================
-   START APPLICATION
-   ========================================================= */
+  if (refreshButton) {
+    refreshButton.addEventListener(
+      "click",
+      refreshDashboard
+    );
+  }
 
+  if (resetButton) {
+    resetButton.addEventListener(
+      "click",
+      resetDemo
+    );
+  }
+
+  window.addEventListener(
+    "beforeunload",
+    () => {
+      if (refreshTimer !== null) {
+        clearInterval(refreshTimer);
+      }
+    }
+  );
+}
+
+/* -------------------- Start application -------------------- */
+
+bindEvents();
 initialize();
